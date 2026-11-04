@@ -1,337 +1,213 @@
-# 🦆 Microduck - 이족보행 로봇 강화학습 프로젝트
+# Microduck 강화학습 훈련 프로젝트
 
-작은 이족보행 로봇 "Microduck"을 강화학습(RL)으로 걷게 만드는 프로젝트입니다.  
-MuJoCo와 Genesis 물리 시뮬레이터를 사용하여 GPU 기반 대규모 병렬 학습을 지원합니다.
+Pollen Robotics의 Microduck 이족보행 로봇을 위한 강화학습 훈련 프로젝트입니다.
 
-> **크레딧**: 이 프로젝트는 [Open Duck Mini v2](https://github.com/apirrone/Open_Duck_Mini) (Apache 2.0 라이선스)와 [Open Duck Playground](https://github.com/apirrone/Open_Duck_Playground)에서 영감을 받았습니다.
+## 로봇 정보
 
----
+**Microduck**은 Pollen Robotics에서 개발한 소형 이족보행 로봇입니다.
 
-## 📋 목차
+- **높이**: ~25cm
+- **무게**: ~800g
+- **자유도**: 14 DOF (액추에이터)
+  - 왼쪽 다리: hip_yaw, hip_roll, hip_pitch, knee, ankle (5개)
+  - 머리: neck_pitch, head_pitch, head_yaw, head_roll (4개)
+  - 오른쪽 다리: hip_yaw, hip_roll, hip_pitch, knee, ankle (5개)
+- **모터**: Dynamixel XL330 (15개)
 
-- [프로젝트 구조](#프로젝트-구조)
-- [설치 방법 (Windows 11)](#설치-방법-windows-11)
-- [사용 방법](#사용-방법)
-- [커리큘럼 학습 단계](#커리큘럼-학습-단계)
-- [보상 함수 설명](#보상-함수-설명)
-- [하이퍼파라미터 조정](#하이퍼파라미터-조정)
-- [문제 해결](#문제-해결)
+### 로봇 모델 출처
 
----
+- **저장소**: [pollen-robotics/microduck_rl](https://github.com/pollen-robotics/microduck_rl)
+- **브랜치**: develop
+- **라이선스**:
+  - STL 메시 파일: CC BY-NC-SA 4.0 (Pollen Robotics)
+  - MJCF XML 파일: Apache 2.0 (Pollen Robotics)
 
-## 📁 프로젝트 구조
+## 시스템 요구사항
 
-```
-microduck/
-├── assets/
-│   └── microduck.xml      # 로봇 MJCF 모델 파일
-├── envs/
-│   ├── __init__.py
-│   └── microduck_env.py   # Gymnasium 환경 구현
-├── scripts/
-│   ├── train.py           # PPO 학습 스크립트
-│   └── play.py            # 학습된 정책 평가/시각화
-├── runs/                   # 학습 결과 저장 폴더
-│   └── <실험명>/
-│       ├── model_*.pt     # 체크포인트
-│       └── progress.csv   # 학습 진행 로그
-├── requirements.txt       # Python 의존성
-└── README.md              # 이 문서
-```
+- **OS**: Windows 11 / Linux
+- **GPU**: NVIDIA RTX 4060 (8GB VRAM) 이상 권장
+- **Python**: 3.11
+- **CUDA**: 12.1 이상
 
----
+## 설치
 
-## 🛠 설치 방법 (Windows 11)
+```bash
+# 저장소 클론
+git clone <repository-url>
+cd microduck-rl
 
-### 요구 사항
-
-- **OS**: Windows 11
-- **GPU**: NVIDIA RTX 4060 Laptop (8GB VRAM) 이상
-- **Python**: 3.11.x
-- **CUDA**: 12.x
-
-### 1단계: Python 가상환경 생성
-
-PowerShell을 **관리자 권한**으로 실행하고:
-
-```powershell
-# 프로젝트 폴더로 이동
-cd C:\path\to\microduck
-
-# 가상환경 생성
+# 가상환경 생성 (권장)
 python -m venv venv
+source venv/bin/activate  # Linux
+# 또는
+venv\Scripts\activate  # Windows
 
-# 가상환경 활성화
-.\venv\Scripts\Activate
-
-# pip 업그레이드
-python -m pip install --upgrade pip
+# 패키지 설치
+pip install -r requirements.txt
 ```
 
-### 2단계: PyTorch 설치 (CUDA 12.8)
+### Genesis 설치 (GPU 가속)
 
-```powershell
-# CUDA 12.8 버전 PyTorch 설치
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+GPU 가속 시뮬레이션을 위해 Genesis를 설치합니다:
+
+```bash
+pip install genesis-world==1.4.5
 ```
 
-> **참고**: CUDA 12.1을 사용하는 경우 `cu128` 대신 `cu121`을 사용하세요.
+> **참고**: Genesis는 NVIDIA GPU와 CUDA가 필요합니다.
 
-### 3단계: 나머지 패키지 설치
+## 커리큘럼 기반 훈련
 
-```powershell
-# Genesis 및 기타 의존성
-pip install genesis-world numpy gymnasium tensorboard tqdm matplotlib
+훈련은 3단계 커리큘럼으로 진행됩니다:
 
-# MuJoCo (선택사항, CPU 디버깅용)
-pip install mujoco
+### 1단계: STAND (서기)
+
+로봇이 균형을 잡고 서있는 것을 학습합니다.
+
+```bash
+python train.py --stage stand --num-envs 2048 --iterations 1000
 ```
 
-### 4단계: 설치 확인
+### 2단계: WALK (걷기)
 
-```powershell
-python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
-python -c "import genesis; print('Genesis OK')"
-python -c "import mujoco; print(f'MuJoCo: {mujoco.__version__}')"
+전방으로 걷는 것을 학습합니다.
+
+```bash
+python train.py --stage walk --num-envs 2048 --iterations 2000 --resume checkpoints/stand_best.pt
 ```
 
----
+### 3단계: COMMAND (속도 명령)
 
-## 🎮 사용 방법
+임의의 속도 명령을 추종하면서 도메인 랜덤화를 적용합니다.
 
-### 기본 학습 시작
-
-```powershell
-# 1단계: 균형 잡기 학습 (약 500 반복)
-python scripts/train.py --stage stand --num-envs 1024 --iterations 500
-
-# 2단계: 걷기 학습 (약 5000 반복, 1단계 체크포인트 사용)
-python scripts/train.py --stage walk --num-envs 1024 --iterations 5000 --checkpoint runs/microduck_stand_*/model_final.pt
-
-# 3단계: 속도 명령 추적 학습 (약 10000 반복)
-python scripts/train.py --stage command --num-envs 1024 --iterations 10000 --checkpoint runs/microduck_walk_*/model_final.pt
+```bash
+python train.py --stage command --num-envs 2048 --iterations 3000 --resume checkpoints/walk_best.pt
 ```
 
-### 라이브 뷰어로 학습 (느리지만 시각적)
+## 훈련 옵션
 
-```powershell
-# 3x3 그리드로 9개 환경 시각화하며 학습
-python scripts/train.py --stage stand --render --viewer-grid 3x3 --iterations 100
+```bash
+python train.py --help
 ```
 
-### 학습된 정책 평가
+주요 옵션:
+- `--stage`: 커리큘럼 단계 (stand/walk/command)
+- `--num-envs`: 병렬 환경 수 (기본: 2048)
+- `--iterations`: 훈련 반복 횟수
+- `--resume`: 체크포인트에서 이어서 훈련
+- `--backend`: 시뮬레이션 백엔드 (genesis/mujoco)
+- `--device`: 디바이스 (cuda/cpu)
+- `--render`: 실시간 렌더링 활성화
+- `--seed`: 랜덤 시드
 
-```powershell
-# 최신 체크포인트로 평가
-python scripts/play.py
+## 정책 평가
 
-# 특정 체크포인트 지정
-python scripts/play.py --checkpoint runs/microduck_walk_*/model_final.pt --stage walk
+훈련된 정책을 평가하고 시각화합니다:
+
+```bash
+# Genesis 백엔드 (GPU)
+python play.py --checkpoint checkpoints/stand_best.pt --render
+
+# MuJoCo 백엔드 (CPU, 디버깅용)
+python play.py --checkpoint checkpoints/stand_best.pt --backend mujoco --render
+
+# 헤드리스 평가
+python play.py --checkpoint checkpoints/stand_best.pt --episodes 100
 ```
 
-### GPU 메모리 관리 (8GB VRAM)
-
-RTX 4060 8GB의 경우 권장 설정:
-
-| 단계 | 환경 수 | 예상 VRAM |
-|------|---------|-----------|
-| stand | 1024 | ~3-4 GB |
-| walk | 1024 | ~4-5 GB |
-| command | 512 | ~4-5 GB |
-
-```powershell
-# 메모리가 부족하면 환경 수 줄이기
-python scripts/train.py --stage stand --num-envs 512 --iterations 500
-```
-
----
-
-## 📚 커리큘럼 학습 단계
-
-이 프로젝트는 **커리큘럼 학습**을 사용합니다. 쉬운 것부터 어려운 것 순서로 단계별로 학습합니다.
-
-### 1단계: Stand (균형 잡기) 🧍
-
-**목표**: 쓰러지지 않고 제자리에 서있기
-
-- 속도 명령: 없음 (정지 상태)
-- 외부 힘: 없음
-- 도메인 랜덤화: 비활성화
-
-**성공 기준**:
-- 500번 반복 후 평균 보상 ~25 이상
-- 에피소드 길이가 최대치(1000 스텝)에 도달
-
-### 2단계: Walk (걷기) 🚶
-
-**목표**: 앞으로 일정한 속도로 걷기
-
-- 속도 명령: 전방 0.2~0.4 m/s
-- 외부 힘: 없음
-- 도메인 랜덤화: 비활성화
-
-**성공 기준**:
-- 5000번 반복 후 평균 보상 ~50 이상
-- 로봇이 안정적으로 앞으로 이동
-
-### 3단계: Command (명령 추적) 🎯
-
-**목표**: 다양한 속도 명령을 추적하며 걷기
-
-- 속도 명령: 
-  - X (전/후): -0.2 ~ 0.5 m/s
-  - Y (좌/우): -0.2 ~ 0.2 m/s
-  - Yaw (회전): -0.5 ~ 0.5 rad/s
-- 외부 힘: 5~20N 랜덤 밀기
-- 도메인 랜덤화: 활성화 (질량, 마찰 변화)
-
-**성공 기준**:
-- 10000번 반복 후 평균 보상 ~70 이상
-- 다양한 명령에 부드럽게 반응
-
----
-
-## 🏆 보상 함수 설명
-
-강화학습에서 **보상(Reward)**은 "로봇이 얼마나 잘하고 있는지"를 숫자로 알려주는 점수입니다.
-
-### 보상 항목 상세
-
-| 보상 이름 | 가중치 | 설명 | 초보자 설명 |
-|-----------|--------|------|-------------|
-| **alive** | +2.0 | 쓰러지지 않으면 받는 보상 | "살아있으면 점수!" |
-| **upright** | +1.0 | 몸이 똑바로 서있을수록 높음 | "비뚤어지면 감점" |
-| **height** | +1.0 | 목표 높이(22cm)에 가까울수록 높음 | "너무 웅크리면 감점" |
-| **velocity_tracking** | +2.0 | 명령된 속도와 실제 속도가 비슷할수록 높음 | "시키는 대로 움직이면 점수" |
-| **angular_velocity_tracking** | +0.5 | 회전 속도 추적 정확도 | "회전도 정확하게" |
-| **action_rate** | -0.01 | 행동이 급격히 변하면 감점 | "부드럽게 움직여야 함" |
-| **joint_torque** | -0.0001 | 관절에 힘을 많이 쓰면 감점 | "에너지 아껴 쓰기" |
-
-### 보상 공식 예시
+## 프로젝트 구조
 
 ```
-총 보상 = (alive) + (upright) + (height) + (velocity_tracking) + ...
+microduck-rl/
+├── assets/
+│   ├── microduck.xml      # Microduck MJCF 로봇 모델
+│   ├── scene.xml          # 바닥이 포함된 시뮬레이션 장면
+│   └── meshes/            # STL 메시 파일 (43개)
+│       ├── body.stl
+│       ├── left_hip_yaw_horn.stl
+│       └── ...
+├── envs/
+│   └── microduck_env.py   # Gymnasium 스타일 환경
+├── train.py               # PPO 훈련 스크립트
+├── play.py                # 평가/시각화 스크립트
+├── test_env.py            # 환경 테스트 스크립트
+├── requirements.txt       # 파이썬 패키지 의존성
+├── LICENSE                # MIT + 서드파티 라이선스
+└── README.md              # 이 파일
 ```
 
-예를 들어:
-- 똑바로 서서 멈춰있으면: 2.0 + 1.0 + 1.0 + 2.0 = **6.0**
-- 약간 기울어지고 느리게 움직이면: 2.0 + 0.5 + 0.8 + 1.0 = **4.3**
-- 쓰러지면: 에피소드 종료, 보상 없음
+## 관찰 공간
 
----
+환경의 관찰 벡터 (53차원):
+- 관절 위치 (14)
+- 관절 속도 (14)
+- 기저부 각속도 (3)
+- 중력 벡터 (3)
+- 속도 명령 (3)
+- 이전 행동 (14)
+- 보행 위상 (2)
 
-## ⚙️ 하이퍼파라미터 조정
+## 행동 공간
 
-### 학습 속도가 느릴 때
+14차원 연속 행동 공간 ([-1, 1] 범위):
+- 각 관절의 목표 위치 오프셋
+- 기본 자세에서의 스케일된 오프셋
 
-```powershell
-# 학습률 높이기
-python scripts/train.py --stage stand --lr 1e-3
+## 보상 구조
 
-# 롤아웃 스텝 늘리기
-python scripts/train.py --stage stand --num-steps 48
+- `alive`: 생존 보상 (에피소드 지속)
+- `upright`: 직립 자세 유지
+- `height`: 목표 높이 유지
+- `velocity_tracking`: 속도 명령 추종
+- `angular_velocity_tracking`: 회전 속도 명령 추종
+- `action_rate`: 행동 변화율 페널티
+- `joint_torque`: 관절 토크 페널티
+
+## 종료 조건
+
+- 기저부 높이가 5cm 미만
+- 롤/피치 각도가 1.2 rad (~70°) 초과
+
+## 문제 해결
+
+### Genesis 설치 오류
+
+```bash
+# CUDA 버전 확인
+nvidia-smi
+
+# PyTorch CUDA 버전 확인
+python -c "import torch; print(torch.version.cuda)"
 ```
 
-### 학습이 불안정할 때
+### MuJoCo 렌더링 오류
 
-```powershell
-# 학습률 낮추기
-python scripts/train.py --stage stand --lr 1e-4
-
-# 환경 수 줄이기 (배치 안정성)
-python scripts/train.py --stage stand --num-envs 512
+```bash
+# 필요한 라이브러리 설치 (Linux)
+sudo apt-get install libglfw3 libglew2.1
 ```
 
-### GPU 온도가 높을 때 🌡️
+### 메모리 부족
 
-```powershell
-# 환경 수 줄이기 (GPU 부하 감소)
-python scripts/train.py --stage stand --num-envs 512
-
-# MuJoCo CPU 백엔드 사용 (느리지만 GPU 사용 안함)
-python scripts/train.py --stage stand --backend mujoco --device cpu --num-envs 16
+병렬 환경 수를 줄이세요:
+```bash
+python train.py --num-envs 512
 ```
 
----
+## 라이선스
 
-## 🔧 문제 해결
+이 프로젝트는 MIT 라이선스를 따릅니다.
 
-### "CUDA out of memory" 오류
+**중요**: Microduck 로봇 모델의 STL 메시 파일은 **CC BY-NC-SA 4.0** 라이선스입니다.
+상업적 사용 시 Pollen Robotics에 문의하세요.
 
-```powershell
-# 환경 수 줄이기
-python scripts/train.py --stage stand --num-envs 256
-```
+## 참고 자료
 
-### Genesis 설치 실패
+- [Pollen Robotics](https://www.pollen-robotics.com/)
+- [Microduck RL Repository](https://github.com/pollen-robotics/microduck_rl)
+- [Genesis Simulator](https://genesis-embodied-ai.github.io/)
+- [MuJoCo](https://mujoco.org/)
 
-```powershell
-# pip 캐시 지우고 재설치
-pip cache purge
-pip install genesis-world --no-cache-dir
-```
+## 기여
 
-### "ModuleNotFoundError: No module named 'genesis'"
-
-```powershell
-# 가상환경 활성화 확인
-.\venv\Scripts\Activate
-
-# Genesis 재설치
-pip install genesis-world
-```
-
-### MuJoCo 뷰어가 안 열림
-
-Windows에서는 추가 설정이 필요할 수 있습니다:
-```powershell
-pip install glfw PyOpenGL PyOpenGL_accelerate
-```
-
----
-
-## 📊 학습 모니터링
-
-### TensorBoard 사용
-
-```powershell
-# TensorBoard 실행
-tensorboard --logdir=runs
-
-# 브라우저에서 http://localhost:6006 접속
-```
-
-### progress.csv 분석
-
-```python
-import pandas as pd
-import matplotlib.pyplot as plt
-
-df = pd.read_csv('runs/microduck_stand_*/progress.csv')
-df.plot(x='iteration', y='mean_reward', title='학습 진행')
-plt.show()
-```
-
----
-
-## 🎓 추가 학습 자료
-
-### 강화학습 기초
-- [OpenAI Spinning Up](https://spinningup.openai.com/) - RL 기초 튜토리얼
-- [Stable Baselines3 문서](https://stable-baselines3.readthedocs.io/)
-
-### MuJoCo / Genesis
-- [MuJoCo 공식 문서](https://mujoco.readthedocs.io/)
-- [Genesis 공식 문서](https://genesis-world.readthedocs.io/)
-
-### 관련 프로젝트
-- [Open Duck Mini](https://github.com/apirrone/Open_Duck_Mini) - 실제 로봇
-- [Open Duck Playground](https://github.com/apirrone/Open_Duck_Playground) - MuJoCo 환경
-
----
-
-## 📄 라이선스
-
-이 프로젝트는 MIT 라이선스로 배포됩니다.
-
-로봇 모델은 [Open Duck Mini v2](https://github.com/apirrone/Open_Duck_Mini)의 조인트 구조에서 영감을 받았으며, 해당 프로젝트는 Apache 2.0 라이선스입니다.
+버그 리포트, 기능 요청, PR을 환영합니다!

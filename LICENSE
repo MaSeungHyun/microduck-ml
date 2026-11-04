@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2024
+Copyright (c) 2024 Microduck RL Training Project
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,21 +20,64 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----
 
-ATTRIBUTION NOTICE
+================================================================================
+THIRD-PARTY LICENSES
+================================================================================
 
-This project is inspired by and uses concepts from:
+Microduck Robot Model (assets/microduck.xml, assets/scene.xml, assets/meshes/)
+------------------------------------------------------------------------------
 
-1. Open Duck Mini v2 (https://github.com/apirrone/Open_Duck_Mini)
-   Copyright 2024 Antoine Pirrone, Steve Nguyen
-   Licensed under the Apache License, Version 2.0
+Source: Pollen Robotics - microduck_rl
+Repository: https://github.com/pollen-robotics/microduck_rl
+Commit: develop branch (2024)
 
-2. Open Duck Playground (https://github.com/apirrone/Open_Duck_Playground)
-   Copyright 2025 DeepMind Technologies Limited
-   Copyright 2025 Antoine Pirrone - Steve Nguyen
-   Licensed under the Apache License, Version 2.0
+The Microduck robot model consists of two separately licensed components:
 
-The robot model joint structure is adapted from Open Duck Mini v2.
-The original meshes and detailed robot files can be found in the 
-Open Duck Mini repository.
+
+1. STL Mesh Files (assets/meshes/*.stl)
+---------------------------------------
+
+These files are licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+
+Copyright (c) 2024 Pollen Robotics
+
+You are free to:
+- Share — copy and redistribute the material in any medium or format
+- Adapt — remix, transform, and build upon the material
+
+Under the following terms:
+- Attribution — You must give appropriate credit, provide a link to the license, 
+  and indicate if changes were made.
+- NonCommercial — You may not use the material for commercial purposes.
+- ShareAlike — If you remix, transform, or build upon the material, you must 
+  distribute your contributions under the same license.
+
+Full license text: https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+
+2. MJCF XML Files (assets/microduck.xml, assets/scene.xml)
+----------------------------------------------------------
+
+These files are licensed under the Apache License, Version 2.0.
+
+Copyright (c) 2024 Pollen Robotics
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+
+================================================================================
+
+For questions about licensing, please contact:
+- Pollen Robotics: https://www.pollen-robotics.com/
+- Project maintainers for code-related questions

@@ -32,7 +32,7 @@ def test_mjcf_load():
     
     try:
         import mujoco
-        model_path = os.path.join(os.path.dirname(__file__), "..", "assets", "microduck.xml")
+        model_path = os.path.join(os.path.dirname(__file__), "..", "assets", "scene.xml")
         model = mujoco.MjModel.from_xml_path(model_path)
         data = mujoco.MjData(model)
         
