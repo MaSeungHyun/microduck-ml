@@ -278,6 +278,10 @@ class MicroduckEnv:
         
         # Build scene with parallel environments
         self.scene.build(n_envs=self.num_envs, env_spacing=(0.4, 0.4) if self.render_enabled else (0.0, 0.0))
+        if show_viewer:
+            _idx = vis_opts.rendered_envs_idx
+            _c = np.asarray(self.scene.envs_offset)[np.asarray(list(_idx), dtype=int)].mean(axis=0)
+            self.scene.viewer.set_camera_pose(pos=(_c[0] - 0.7, _c[1] - 0.7, 0.45), lookat=(_c[0], _c[1], 0.08))
         
         # Get joint DOF indices
         self.leg_dof_indices = []

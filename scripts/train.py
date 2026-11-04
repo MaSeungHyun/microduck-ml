@@ -294,7 +294,7 @@ class PPOTrainer:
     
     def load_checkpoint(self, path: str):
         """Load checkpoint"""
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.policy.load_state_dict(checkpoint['policy'])
         if 'optimizer' in checkpoint:
             self.optimizer.load_state_dict(checkpoint['optimizer'])
@@ -316,7 +316,9 @@ class PPOTrainer:
         """Collect rollout data from environment"""
         self.buffer.reset()
         
-        obs, _ = self.env.reset()
+        if getattr(self, '_obs', None) is None:
+            self._obs, _ = self.env.reset()
+        obs = self._obs
         if not isinstance(obs, torch.Tensor):
             obs = torch.tensor(obs, device=self.device)
         
@@ -361,6 +363,7 @@ class PPOTrainer:
             self._cur_rew, self._cur_len = current_rewards, current_lengths
             
             obs = next_obs
+            self._obs = obs
             
             # Render if enabled
             if self.env.render_enabled:

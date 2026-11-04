@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Microduck Policy Evaluation Script
 
@@ -143,7 +143,8 @@ def main():
     
     # Load checkpoint
     print(f"Loading checkpoint: {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=args.device)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import train as _train; import __main__; [setattr(__main__, n, getattr(_train, n)) for n in dir(_train) if not n.startswith("_") and isinstance(getattr(_train, n), type)]
+    checkpoint = torch.load(checkpoint_path, map_location=args.device, weights_only=False)
     
     # Create environment
     stage_map = {
