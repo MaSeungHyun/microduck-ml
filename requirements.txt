@@ -1,0 +1,32 @@
+# Microduck RL Training Environment
+# ===================================
+# 
+# For Windows 11 with NVIDIA RTX 4060 (8GB VRAM)
+# Python 3.11 recommended
+
+# Core dependencies
+numpy>=1.24.0
+gymnasium>=0.29.0
+
+# PyTorch with CUDA 12.x support
+# Install separately: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+# Or for CUDA 12.1: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+torch>=2.0.0
+
+# Physics simulation
+# Genesis (GPU-accelerated) - Primary backend
+genesis-world>=0.4.0
+
+# MuJoCo (CPU-based, optional backup)
+mujoco>=3.0.0
+
+# Visualization (optional, for MuJoCo viewer)
+# mujoco-python-viewer
+
+# Logging and utilities
+tensorboard>=2.13.0
+tqdm>=4.65.0
+matplotlib>=3.7.0
+
+# Optional: rsl_rl for advanced RL algorithms
+# pip install rsl-rl

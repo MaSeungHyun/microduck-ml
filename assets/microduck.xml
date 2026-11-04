@@ -1,0 +1,188 @@
+<!--
+  Microduck - A simplified bipedal robot model for RL training
+  
+  This model is inspired by the Open Duck Mini v2 project by Antoine Pirrone and Steve Nguyen.
+  Original project: https://github.com/apirrone/Open_Duck_Mini (Apache 2.0 License)
+  Reference: https://github.com/apirrone/Open_Duck_Playground
+  
+  Joint structure follows Open Duck Mini v2:
+  - Each leg has 5 DOF: hip_yaw, hip_roll, hip_pitch, knee, ankle
+  - Total: 10 actuated joints
+  
+  This is a simplified geometric approximation for RL training purposes.
+  For the real robot meshes, please refer to the original Open Duck Mini repository.
+-->
+<mujoco model="microduck">
+  <compiler angle="radian" autolimits="true"/>
+  
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast">
+    <flag warmstart="enable"/>
+  </option>
+  
+  <default>
+    <geom contype="1" conaffinity="1" friction="0.8 0.02 0.01" rgba="0.8 0.6 0.2 1"/>
+    <joint damping="0.5" armature="0.01" frictionloss="0.1"/>
+    <position kp="20" forcerange="-3.0 3.0"/>
+    <motor ctrllimited="true" ctrlrange="-1 1"/>
+  </default>
+  
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0.1 0.1 0.2" width="512" height="512"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.3 0.4 0.5" width="512" height="512"/>
+    <material name="grid" texture="grid" texrepeat="8 8" reflectance="0.1"/>
+    <material name="body_mat" rgba="0.9 0.7 0.3 1"/>
+    <material name="leg_mat" rgba="0.3 0.3 0.35 1"/>
+    <material name="foot_mat" rgba="0.2 0.2 0.25 1"/>
+  </asset>
+
+  <worldbody>
+    <!-- Ground plane -->
+    <geom name="floor" type="plane" size="50 50 0.1" material="grid" conaffinity="1" contype="1"/>
+    <light name="light" pos="0 0 6" dir="0 0 -1" diffuse="1 1 1"/>
+    
+    <!-- Robot body -->
+    <body name="trunk" pos="0 0 0.25">
+      <freejoint name="root"/>
+      <inertial pos="0 0 0" mass="0.8" diaginertia="0.003 0.003 0.002"/>
+      
+      <!-- Main body (duck-like torso) -->
+      <geom name="torso" type="capsule" fromto="0 -0.04 0 0 0.04 0" size="0.04" mass="0.5" material="body_mat"/>
+      <geom name="torso_front" type="sphere" pos="0.03 0 0.01" size="0.035" mass="0.15" material="body_mat"/>
+      <geom name="torso_back" type="sphere" pos="-0.03 0 -0.01" size="0.03" mass="0.1" material="body_mat"/>
+      
+      <!-- Head (simplified) -->
+      <geom name="head" type="ellipsoid" pos="0.05 0 0.04" size="0.025 0.02 0.02" mass="0.05" material="body_mat"/>
+      
+      <!-- IMU site for sensors -->
+      <site name="imu" pos="0 0 0" size="0.01"/>
+      
+      <!-- ========== LEFT LEG ========== -->
+      <body name="left_hip_yaw_link" pos="0 0.035 -0.03">
+        <inertial pos="0 0 0" mass="0.05" diaginertia="0.00001 0.00001 0.00001"/>
+        <joint name="left_hip_yaw" type="hinge" axis="0 0 1" range="-0.5 0.5" damping="0.3"/>
+        <geom name="left_hip_yaw_geom" type="sphere" size="0.015" material="leg_mat"/>
+        
+        <body name="left_hip_roll_link" pos="0 0 0">
+          <inertial pos="0 0 0" mass="0.05" diaginertia="0.00001 0.00001 0.00001"/>
+          <joint name="left_hip_roll" type="hinge" axis="1 0 0" range="-0.4 0.4" damping="0.3"/>
+          <geom name="left_hip_roll_geom" type="sphere" size="0.012" material="leg_mat"/>
+          
+          <body name="left_hip_pitch_link" pos="0 0 0">
+            <inertial pos="0 0 -0.03" mass="0.08" diaginertia="0.00005 0.00005 0.00001"/>
+            <joint name="left_hip_pitch" type="hinge" axis="0 1 0" range="-1.2 1.2" damping="0.3"/>
+            
+            <!-- Upper leg -->
+            <geom name="left_upper_leg" type="capsule" fromto="0 0 0 0 0 -0.06" size="0.012" material="leg_mat"/>
+            
+            <body name="left_knee_link" pos="0 0 -0.06">
+              <inertial pos="0 0 -0.03" mass="0.06" diaginertia="0.00003 0.00003 0.00001"/>
+              <joint name="left_knee" type="hinge" axis="0 1 0" range="-2.0 0.1" damping="0.3"/>
+              <geom name="left_knee_geom" type="sphere" size="0.012" material="leg_mat"/>
+              
+              <!-- Lower leg -->
+              <geom name="left_lower_leg" type="capsule" fromto="0 0 0 0 0 -0.06" size="0.01" material="leg_mat"/>
+              
+              <body name="left_ankle_link" pos="0 0 -0.06">
+                <inertial pos="0 0 0" mass="0.04" diaginertia="0.00001 0.00001 0.00001"/>
+                <joint name="left_ankle" type="hinge" axis="0 1 0" range="-0.8 0.8" damping="0.2"/>
+                
+                <!-- Foot -->
+                <geom name="left_foot" type="box" pos="0.01 0 -0.01" size="0.03 0.02 0.01" material="foot_mat" friction="1 0.02 0.01"/>
+                <site name="left_foot_site" pos="0.01 0 -0.02" size="0.005"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      
+      <!-- ========== RIGHT LEG ========== -->
+      <body name="right_hip_yaw_link" pos="0 -0.035 -0.03">
+        <inertial pos="0 0 0" mass="0.05" diaginertia="0.00001 0.00001 0.00001"/>
+        <joint name="right_hip_yaw" type="hinge" axis="0 0 1" range="-0.5 0.5" damping="0.3"/>
+        <geom name="right_hip_yaw_geom" type="sphere" size="0.015" material="leg_mat"/>
+        
+        <body name="right_hip_roll_link" pos="0 0 0">
+          <inertial pos="0 0 0" mass="0.05" diaginertia="0.00001 0.00001 0.00001"/>
+          <joint name="right_hip_roll" type="hinge" axis="1 0 0" range="-0.4 0.4" damping="0.3"/>
+          <geom name="right_hip_roll_geom" type="sphere" size="0.012" material="leg_mat"/>
+          
+          <body name="right_hip_pitch_link" pos="0 0 0">
+            <inertial pos="0 0 -0.03" mass="0.08" diaginertia="0.00005 0.00005 0.00001"/>
+            <joint name="right_hip_pitch" type="hinge" axis="0 1 0" range="-1.2 1.2" damping="0.3"/>
+            
+            <!-- Upper leg -->
+            <geom name="right_upper_leg" type="capsule" fromto="0 0 0 0 0 -0.06" size="0.012" material="leg_mat"/>
+            
+            <body name="right_knee_link" pos="0 0 -0.06">
+              <inertial pos="0 0 -0.03" mass="0.06" diaginertia="0.00003 0.00003 0.00001"/>
+              <joint name="right_knee" type="hinge" axis="0 1 0" range="-2.0 0.1" damping="0.3"/>
+              <geom name="right_knee_geom" type="sphere" size="0.012" material="leg_mat"/>
+              
+              <!-- Lower leg -->
+              <geom name="right_lower_leg" type="capsule" fromto="0 0 0 0 0 -0.06" size="0.01" material="leg_mat"/>
+              
+              <body name="right_ankle_link" pos="0 0 -0.06">
+                <inertial pos="0 0 0" mass="0.04" diaginertia="0.00001 0.00001 0.00001"/>
+                <joint name="right_ankle" type="hinge" axis="0 1 0" range="-0.8 0.8" damping="0.2"/>
+                
+                <!-- Foot -->
+                <geom name="right_foot" type="box" pos="0.01 0 -0.01" size="0.03 0.02 0.01" material="foot_mat" friction="1 0.02 0.01"/>
+                <site name="right_foot_site" pos="0.01 0 -0.02" size="0.005"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  
+  <actuator>
+    <!-- Left leg actuators -->
+    <position name="left_hip_yaw_act" joint="left_hip_yaw" kp="20" forcerange="-3 3"/>
+    <position name="left_hip_roll_act" joint="left_hip_roll" kp="20" forcerange="-3 3"/>
+    <position name="left_hip_pitch_act" joint="left_hip_pitch" kp="25" forcerange="-4 4"/>
+    <position name="left_knee_act" joint="left_knee" kp="25" forcerange="-4 4"/>
+    <position name="left_ankle_act" joint="left_ankle" kp="15" forcerange="-2 2"/>
+    
+    <!-- Right leg actuators -->
+    <position name="right_hip_yaw_act" joint="right_hip_yaw" kp="20" forcerange="-3 3"/>
+    <position name="right_hip_roll_act" joint="right_hip_roll" kp="20" forcerange="-3 3"/>
+    <position name="right_hip_pitch_act" joint="right_hip_pitch" kp="25" forcerange="-4 4"/>
+    <position name="right_knee_act" joint="right_knee" kp="25" forcerange="-4 4"/>
+    <position name="right_ankle_act" joint="right_ankle" kp="15" forcerange="-2 2"/>
+  </actuator>
+  
+  <sensor>
+    <!-- IMU sensors -->
+    <accelerometer name="accelerometer" site="imu"/>
+    <gyro name="gyro" site="imu"/>
+    <framequat name="orientation" objtype="site" objname="imu"/>
+    
+    <!-- Foot contact sensors -->
+    <touch name="left_foot_touch" site="left_foot_site"/>
+    <touch name="right_foot_touch" site="right_foot_site"/>
+    
+    <!-- Joint position/velocity sensors -->
+    <jointpos name="left_hip_yaw_pos" joint="left_hip_yaw"/>
+    <jointpos name="left_hip_roll_pos" joint="left_hip_roll"/>
+    <jointpos name="left_hip_pitch_pos" joint="left_hip_pitch"/>
+    <jointpos name="left_knee_pos" joint="left_knee"/>
+    <jointpos name="left_ankle_pos" joint="left_ankle"/>
+    <jointpos name="right_hip_yaw_pos" joint="right_hip_yaw"/>
+    <jointpos name="right_hip_roll_pos" joint="right_hip_roll"/>
+    <jointpos name="right_hip_pitch_pos" joint="right_hip_pitch"/>
+    <jointpos name="right_knee_pos" joint="right_knee"/>
+    <jointpos name="right_ankle_pos" joint="right_ankle"/>
+    
+    <jointvel name="left_hip_yaw_vel" joint="left_hip_yaw"/>
+    <jointvel name="left_hip_roll_vel" joint="left_hip_roll"/>
+    <jointvel name="left_hip_pitch_vel" joint="left_hip_pitch"/>
+    <jointvel name="left_knee_vel" joint="left_knee"/>
+    <jointvel name="left_ankle_vel" joint="left_ankle"/>
+    <jointvel name="right_hip_yaw_vel" joint="right_hip_yaw"/>
+    <jointvel name="right_hip_roll_vel" joint="right_hip_roll"/>
+    <jointvel name="right_hip_pitch_vel" joint="right_hip_pitch"/>
+    <jointvel name="right_knee_vel" joint="right_knee"/>
+    <jointvel name="right_ankle_vel" joint="right_ankle"/>
+  </sensor>
+</mujoco>
