@@ -322,8 +322,8 @@ class PPOTrainer:
         
         episode_rewards = []
         episode_lengths = []
-        current_rewards = torch.zeros(self.env.num_envs, device=self.device)
-        current_lengths = torch.zeros(self.env.num_envs, device=self.device)
+        current_rewards = torch.zeros(self.env.num_envs, device=self.device, dtype=torch.float32)
+        current_lengths = torch.zeros(self.env.num_envs, device=self.device, dtype=torch.float32)
         
         for step in range(self.cfg.num_steps):
             with torch.no_grad():
@@ -331,24 +331,30 @@ class PPOTrainer:
             
             next_obs, rewards, dones, truncated, _ = self.env.step(actions)
             if not isinstance(next_obs, torch.Tensor):
-                next_obs = torch.tensor(next_obs, device=self.device)
+                next_obs = torch.tensor(next_obs, device=self.device, dtype=torch.float32)
             if not isinstance(rewards, torch.Tensor):
-                rewards = torch.tensor(rewards, device=self.device)
+                rewards = torch.tensor(rewards, device=self.device, dtype=torch.float32)
             if not isinstance(dones, torch.Tensor):
-                dones = torch.tensor(dones, device=self.device)
+                dones = torch.tensor(dones, device=self.device, dtype=torch.bool)
+            if not isinstance(truncated, torch.Tensor):
+                truncated = torch.tensor(truncated, device=self.device, dtype=torch.bool)
             
             self.buffer.add(obs, actions, rewards, dones, values, log_probs)
             
             # Track episode stats
-            current_rewards += rewards
-            current_lengths += 1
+            current_rewards = current_rewards + rewards
+            current_lengths = current_lengths + 1.0
             
-            done_indices = (dones | truncated).nonzero(as_tuple=True)[0]
+            # Find completed episodes
+            done_mask = dones | truncated
+            done_indices = torch.where(done_mask)[0]
             for idx in done_indices:
-                episode_rewards.append(current_rewards[idx].item())
-                episode_lengths.append(current_lengths[idx].item())
-                current_rewards[idx] = 0
-                current_lengths[idx] = 0
+                ep_reward = float(current_rewards[idx].item())
+                ep_length = float(current_lengths[idx].item())
+                episode_rewards.append(ep_reward)
+                episode_lengths.append(ep_length)
+                current_rewards[idx] = 0.0
+                current_lengths[idx] = 0.0
             
             obs = next_obs
             

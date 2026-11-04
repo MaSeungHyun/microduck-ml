@@ -16,7 +16,7 @@ Inspired by:
 import numpy as np
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 import os
 
 try:
@@ -85,10 +85,14 @@ class EnvConfig:
         "symmetry": 0.2,
     })
     
-    # Termination
-    min_height: float = 0.1  # Terminate if trunk below this height
-    max_pitch: float = 1.0   # Terminate if trunk tilted too much
-    max_roll: float = 1.0
+    # Termination - more lenient for learning
+    min_height: float = 0.08  # Terminate if trunk below this height
+    max_pitch: float = 1.2    # ~70 degrees - allow significant lean
+    max_roll: float = 1.2
+    
+    # Robot initial height
+    init_height: float = 0.22  # Initial spawn height
+    target_height: float = 0.20  # Target standing height for reward
     
     # Assets
     robot_xml: str = "assets/microduck.xml"
@@ -151,6 +155,9 @@ class MicroduckEnv:
         # State buffers (will be torch tensors on GPU or numpy on CPU)
         self.num_envs = self.cfg.num_envs
         
+        # Genesis-specific: DOF indices for leg joints (excluding free joint base DOFs)
+        self.leg_dof_indices: Optional[List[int]] = None
+        
         # Initialize backend
         if self.backend == "genesis":
             self._init_genesis()
@@ -200,18 +207,34 @@ class MicroduckEnv:
             logging_level="warning",
         )
         
-        # Create scene
+        # Create scene with viewer options (use refresh_rate instead of max_FPS for Genesis 1.4.5+)
+        # When headless=True, completely disable visualization to avoid EGL requirements
+        viewer_opts = None
+        vis_opts = None
+        show_viewer = False
+        
+        if self.render_enabled and not self.headless:
+            viewer_opts = gs.options.ViewerOptions(
+                refresh_rate=60,  # Genesis 1.4.5+ uses refresh_rate, not max_FPS
+                camera_pos=(2.0, 0.0, 1.5),
+                camera_lookat=(0.0, 0.0, 0.3),
+            )
+            show_viewer = True
+        else:
+            # Headless mode: disable visualization completely
+            vis_opts = gs.options.VisOptions(
+                show_world_frame=False,
+                visualize_mpm_boundary=False,
+            )
+        
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(
                 dt=self.cfg.sim_dt,
                 substeps=2,
             ),
-            viewer_options=gs.options.ViewerOptions(
-                max_FPS=60,
-                camera_pos=(2.0, 0.0, 1.5),
-                camera_lookat=(0.0, 0.0, 0.3),
-            ) if self.render_enabled else None,
-            show_viewer=self.render_enabled and not self.headless,
+            viewer_options=viewer_opts,
+            vis_options=vis_opts,
+            show_viewer=show_viewer,
         )
         
         # Add ground plane
@@ -229,14 +252,22 @@ class MicroduckEnv:
         # Build scene with parallel environments
         self.scene.build(n_envs=self.num_envs)
         
-        # Get joint indices
-        self.joint_indices = []
+        # Get leg joint DOF indices (Genesis has 6 DOFs for free joint + N for actuated joints)
+        # We need to find the indices of only the leg joints, excluding the free joint base DOFs
+        self.leg_dof_indices = []
         for name in self.JOINT_NAMES:
             try:
-                idx = self.robot.get_joint(name).dof_idx_local
-                self.joint_indices.append(idx)
-            except:
-                pass
+                joint = self.robot.get_joint(name)
+                idx = joint.dof_idx_local
+                self.leg_dof_indices.append(idx)
+            except Exception as e:
+                print(f"Warning: Could not find joint {name}: {e}")
+        
+        if len(self.leg_dof_indices) != self.NUM_JOINTS:
+            print(f"Warning: Found {len(self.leg_dof_indices)} joints, expected {self.NUM_JOINTS}")
+        
+        # Store total DOF count for reference
+        self.total_dofs = self.robot.n_dofs
         
         self._backend_initialized = True
     
@@ -266,27 +297,30 @@ class MicroduckEnv:
         """Initialize state buffers"""
         import torch
         
-        self.use_torch = self.backend == "genesis" and self.device == "cuda"
+        self.use_torch = self.backend == "genesis"
         
         if self.use_torch:
             device = torch.device(self.device)
-            self.obs_buf = torch.zeros((self.num_envs, self.num_obs), device=device)
-            self.actions = torch.zeros((self.num_envs, self.num_actions), device=device)
-            self.last_actions = torch.zeros((self.num_envs, self.num_actions), device=device)
-            self.rewards = torch.zeros(self.num_envs, device=device)
+            self.obs_buf = torch.zeros((self.num_envs, self.num_obs), device=device, dtype=torch.float32)
+            self.actions = torch.zeros((self.num_envs, self.num_actions), device=device, dtype=torch.float32)
+            self.last_actions = torch.zeros((self.num_envs, self.num_actions), device=device, dtype=torch.float32)
+            self.rewards = torch.zeros(self.num_envs, device=device, dtype=torch.float32)
             self.dones = torch.zeros(self.num_envs, dtype=torch.bool, device=device)
-            self.episode_length = torch.zeros(self.num_envs, dtype=torch.int32, device=device)
+            self.episode_length = torch.zeros(self.num_envs, dtype=torch.float32, device=device)  # Float for GPU ops
             
             # Velocity commands
-            self.commands = torch.zeros((self.num_envs, 3), device=device)
-            self.command_time = torch.zeros(self.num_envs, device=device)
+            self.commands = torch.zeros((self.num_envs, 3), device=device, dtype=torch.float32)
+            self.command_time = torch.zeros(self.num_envs, device=device, dtype=torch.float32)
             
             # Phase for gait timing (sin/cos representation)
-            self.phase = torch.zeros(self.num_envs, device=device)
+            self.phase = torch.zeros(self.num_envs, device=device, dtype=torch.float32)
             self.gait_freq = 2.0  # Hz
             
             # Push timing
-            self.push_time = torch.zeros(self.num_envs, device=device)
+            self.push_time = torch.zeros(self.num_envs, device=device, dtype=torch.float32)
+            
+            # Episode statistics tracking
+            self.episode_rewards = torch.zeros(self.num_envs, device=device, dtype=torch.float32)
         else:
             # Numpy fallback for MuJoCo/CPU
             self.obs_buf = np.zeros((self.num_envs, self.num_obs), dtype=np.float32)
@@ -294,12 +328,13 @@ class MicroduckEnv:
             self.last_actions = np.zeros((self.num_envs, self.num_actions), dtype=np.float32)
             self.rewards = np.zeros(self.num_envs, dtype=np.float32)
             self.dones = np.zeros(self.num_envs, dtype=bool)
-            self.episode_length = np.zeros(self.num_envs, dtype=np.int32)
+            self.episode_length = np.zeros(self.num_envs, dtype=np.float32)
             self.commands = np.zeros((self.num_envs, 3), dtype=np.float32)
             self.command_time = np.zeros(self.num_envs, dtype=np.float32)
             self.phase = np.zeros(self.num_envs, dtype=np.float32)
             self.gait_freq = 2.0
             self.push_time = np.zeros(self.num_envs, dtype=np.float32)
+            self.episode_rewards = np.zeros(self.num_envs, dtype=np.float32)
     
     def reset(self, env_ids=None):
         """
@@ -313,7 +348,7 @@ class MicroduckEnv:
             info: Additional info dict
         """
         if env_ids is None:
-            env_ids = range(self.num_envs) if not self.use_torch else None
+            env_ids = None  # Will reset all
         
         if self.backend == "genesis":
             self._reset_genesis(env_ids)
@@ -329,7 +364,8 @@ class MicroduckEnv:
             if env_ids is None:
                 self.phase.zero_()
             else:
-                self.phase[env_ids] = 0
+                env_ids_t = torch.tensor(env_ids, device=self.device, dtype=torch.long)
+                self.phase[env_ids_t] = 0.0
         else:
             if env_ids is None:
                 self.phase[:] = 0
@@ -346,40 +382,71 @@ class MicroduckEnv:
         import torch
         
         if env_ids is None:
-            # Reset all
-            self.robot.set_dofs_position(
-                torch.tensor(self.DEFAULT_JOINT_POS, device=self.device).unsqueeze(0).expand(self.num_envs, -1),
-            )
-            self.robot.set_dofs_velocity(torch.zeros((self.num_envs, self.NUM_JOINTS), device=self.device))
+            # Reset all environments
+            n = self.num_envs
+            
+            # Create full DOF position array (total_dofs includes free joint)
+            # Free joint DOFs are typically the first 6 (or 7 with quat), 
+            # but position/velocity setting often handles base separately
+            
+            # Set leg joint positions only using the leg DOF indices
+            leg_pos = torch.tensor(self.DEFAULT_JOINT_POS, device=self.device, dtype=torch.float32)
+            leg_pos = leg_pos.unsqueeze(0).expand(n, -1)
+            
+            # Use the leg DOF indices to set only leg joints
+            if self.leg_dof_indices:
+                dof_indices = torch.tensor(self.leg_dof_indices, device=self.device, dtype=torch.long)
+                self.robot.set_dofs_position(leg_pos, dofs_idx_local=dof_indices)
+                self.robot.set_dofs_velocity(
+                    torch.zeros((n, len(self.leg_dof_indices)), device=self.device, dtype=torch.float32),
+                    dofs_idx_local=dof_indices
+                )
             
             # Reset base position/orientation
-            init_pos = torch.tensor([[0.0, 0.0, 0.25]], device=self.device).expand(self.num_envs, -1)
-            init_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device).expand(self.num_envs, -1)
+            init_pos = torch.tensor([[0.0, 0.0, self.cfg.init_height]], device=self.device, dtype=torch.float32)
+            init_pos = init_pos.expand(n, -1)
+            init_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device, dtype=torch.float32)
+            init_quat = init_quat.expand(n, -1)
             self.robot.set_pos(init_pos)
             self.robot.set_quat(init_quat)
             
+            # Reset base velocity
+            self.robot.set_vel(torch.zeros((n, 3), device=self.device, dtype=torch.float32))
+            self.robot.set_ang(torch.zeros((n, 3), device=self.device, dtype=torch.float32))
+            
             self.episode_length.zero_()
             self.last_actions.zero_()
+            self.episode_rewards.zero_()
         else:
-            env_ids_tensor = torch.tensor(env_ids, device=self.device)
+            # Reset specific environments
+            env_ids_tensor = torch.tensor(env_ids, device=self.device, dtype=torch.long)
             n = len(env_ids)
             
-            self.robot.set_dofs_position(
-                torch.tensor(self.DEFAULT_JOINT_POS, device=self.device).unsqueeze(0).expand(n, -1),
-                envs_idx=env_ids_tensor,
-            )
-            self.robot.set_dofs_velocity(
-                torch.zeros((n, self.NUM_JOINTS), device=self.device),
-                envs_idx=env_ids_tensor,
-            )
+            leg_pos = torch.tensor(self.DEFAULT_JOINT_POS, device=self.device, dtype=torch.float32)
+            leg_pos = leg_pos.unsqueeze(0).expand(n, -1)
             
-            init_pos = torch.tensor([[0.0, 0.0, 0.25]], device=self.device).expand(n, -1)
-            init_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device).expand(n, -1)
+            if self.leg_dof_indices:
+                dof_indices = torch.tensor(self.leg_dof_indices, device=self.device, dtype=torch.long)
+                self.robot.set_dofs_position(leg_pos, dofs_idx_local=dof_indices, envs_idx=env_ids_tensor)
+                self.robot.set_dofs_velocity(
+                    torch.zeros((n, len(self.leg_dof_indices)), device=self.device, dtype=torch.float32),
+                    dofs_idx_local=dof_indices,
+                    envs_idx=env_ids_tensor
+                )
+            
+            init_pos = torch.tensor([[0.0, 0.0, self.cfg.init_height]], device=self.device, dtype=torch.float32)
+            init_pos = init_pos.expand(n, -1)
+            init_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device, dtype=torch.float32)
+            init_quat = init_quat.expand(n, -1)
+            
             self.robot.set_pos(init_pos, envs_idx=env_ids_tensor)
             self.robot.set_quat(init_quat, envs_idx=env_ids_tensor)
+            self.robot.set_vel(torch.zeros((n, 3), device=self.device, dtype=torch.float32), envs_idx=env_ids_tensor)
+            self.robot.set_ang(torch.zeros((n, 3), device=self.device, dtype=torch.float32), envs_idx=env_ids_tensor)
             
-            self.episode_length[env_ids_tensor] = 0
-            self.last_actions[env_ids_tensor] = 0
+            self.episode_length[env_ids_tensor] = 0.0
+            self.last_actions[env_ids_tensor] = 0.0
+            self.episode_rewards[env_ids_tensor] = 0.0
     
     def _reset_mujoco(self, env_ids):
         """Reset MuJoCo environments"""
@@ -389,12 +456,13 @@ class MicroduckEnv:
         for i in env_ids:
             mujoco.mj_resetData(self.mj_model, self.mj_datas[i])
             # Set initial joint positions
-            self.mj_datas[i].qpos[:7] = [0, 0, 0.25, 1, 0, 0, 0]  # Free joint
+            self.mj_datas[i].qpos[:7] = [0, 0, self.cfg.init_height, 1, 0, 0, 0]  # Free joint
             self.mj_datas[i].qpos[7:7+self.NUM_JOINTS] = self.DEFAULT_JOINT_POS
             mujoco.mj_forward(self.mj_model, self.mj_datas[i])
             
             self.episode_length[i] = 0
             self.last_actions[i] = 0
+            self.episode_rewards[i] = 0
     
     def _resample_commands(self, env_ids=None):
         """Resample velocity commands for specified environments"""
@@ -403,32 +471,29 @@ class MicroduckEnv:
         if self.use_torch:
             if env_ids is None:
                 n = self.num_envs
-                # X velocity (forward/backward)
-                self.commands[:, 0] = torch.empty(n, device=self.device).uniform_(
+                self.commands[:, 0] = torch.empty(n, device=self.device, dtype=torch.float32).uniform_(
                     self.cfg.cmd_vel_x_range[0], self.cfg.cmd_vel_x_range[1]
                 )
-                # Y velocity (lateral)
-                self.commands[:, 1] = torch.empty(n, device=self.device).uniform_(
+                self.commands[:, 1] = torch.empty(n, device=self.device, dtype=torch.float32).uniform_(
                     self.cfg.cmd_vel_y_range[0], self.cfg.cmd_vel_y_range[1]
                 )
-                # Yaw velocity (turning)
-                self.commands[:, 2] = torch.empty(n, device=self.device).uniform_(
+                self.commands[:, 2] = torch.empty(n, device=self.device, dtype=torch.float32).uniform_(
                     self.cfg.cmd_vel_yaw_range[0], self.cfg.cmd_vel_yaw_range[1]
                 )
                 self.command_time.zero_()
             else:
-                env_ids_tensor = torch.tensor(env_ids, device=self.device)
+                env_ids_tensor = torch.tensor(env_ids, device=self.device, dtype=torch.long)
                 n = len(env_ids)
-                self.commands[env_ids_tensor, 0] = torch.empty(n, device=self.device).uniform_(
+                self.commands[env_ids_tensor, 0] = torch.empty(n, device=self.device, dtype=torch.float32).uniform_(
                     self.cfg.cmd_vel_x_range[0], self.cfg.cmd_vel_x_range[1]
                 )
-                self.commands[env_ids_tensor, 1] = torch.empty(n, device=self.device).uniform_(
+                self.commands[env_ids_tensor, 1] = torch.empty(n, device=self.device, dtype=torch.float32).uniform_(
                     self.cfg.cmd_vel_y_range[0], self.cfg.cmd_vel_y_range[1]
                 )
-                self.commands[env_ids_tensor, 2] = torch.empty(n, device=self.device).uniform_(
+                self.commands[env_ids_tensor, 2] = torch.empty(n, device=self.device, dtype=torch.float32).uniform_(
                     self.cfg.cmd_vel_yaw_range[0], self.cfg.cmd_vel_yaw_range[1]
                 )
-                self.command_time[env_ids_tensor] = 0
+                self.command_time[env_ids_tensor] = 0.0
         else:
             if env_ids is None:
                 env_ids = range(self.num_envs)
@@ -462,10 +527,11 @@ class MicroduckEnv:
         
         # Clip and scale actions
         if self.use_torch:
-            self.actions = torch.clamp(actions if isinstance(actions, torch.Tensor) else torch.tensor(actions, device=self.device), -1.0, 1.0)
-            # Scale actions to joint range
-            action_scale = torch.tensor([0.5, 0.4, 1.2, 2.0, 0.8] * 2, device=self.device)
-            default_pos = torch.tensor(self.DEFAULT_JOINT_POS, device=self.device)
+            if not isinstance(actions, torch.Tensor):
+                actions = torch.tensor(actions, device=self.device, dtype=torch.float32)
+            self.actions = torch.clamp(actions, -1.0, 1.0)
+            action_scale = torch.tensor([0.5, 0.4, 1.2, 2.0, 0.8] * 2, device=self.device, dtype=torch.float32)
+            default_pos = torch.tensor(self.DEFAULT_JOINT_POS, device=self.device, dtype=torch.float32)
             target_positions = default_pos + self.actions * action_scale
         else:
             self.actions = np.clip(actions_np, -1.0, 1.0)
@@ -480,8 +546,8 @@ class MicroduckEnv:
         
         # Update phase for gait timing
         if self.use_torch:
-            self.phase += 2 * np.pi * self.gait_freq * self.cfg.dt
-            self.phase = torch.fmod(self.phase, 2 * np.pi)
+            self.phase = self.phase + 2.0 * np.pi * self.gait_freq * self.cfg.dt
+            self.phase = torch.fmod(self.phase, 2.0 * np.pi)
         else:
             self.phase += 2 * np.pi * self.gait_freq * self.cfg.dt
             self.phase = np.fmod(self.phase, 2 * np.pi)
@@ -492,7 +558,7 @@ class MicroduckEnv:
         
         # Resample commands periodically
         if self.use_torch:
-            self.command_time += self.cfg.dt
+            self.command_time = self.command_time + self.cfg.dt
             resample_mask = self.command_time > self.cfg.command_resample_time
             if resample_mask.any():
                 resample_ids = torch.where(resample_mask)[0]
@@ -509,11 +575,13 @@ class MicroduckEnv:
         self._check_termination()
         
         # Update episode length and check truncation
-        self.episode_length += 1
+        self.episode_length = self.episode_length + 1.0
         if self.use_torch:
             truncated = self.episode_length >= self.cfg.episode_length
+            self.episode_rewards = self.episode_rewards + self.rewards
         else:
             truncated = self.episode_length >= self.cfg.episode_length
+            self.episode_rewards += self.rewards
         
         # Save last actions
         if self.use_torch:
@@ -523,7 +591,8 @@ class MicroduckEnv:
         
         # Reset done environments
         if self.use_torch:
-            reset_ids = torch.where(self.dones | truncated)[0]
+            reset_mask = self.dones | truncated
+            reset_ids = torch.where(reset_mask)[0]
             if len(reset_ids) > 0:
                 self.reset(reset_ids.tolist())
         else:
@@ -535,7 +604,12 @@ class MicroduckEnv:
     
     def _step_genesis(self, target_positions):
         """Step Genesis simulation"""
-        self.robot.control_dofs_position(target_positions)
+        import torch
+        
+        # Control only the leg joints using leg DOF indices
+        if self.leg_dof_indices:
+            dof_indices = torch.tensor(self.leg_dof_indices, device=self.device, dtype=torch.long)
+            self.robot.control_dofs_position(target_positions, dofs_idx_local=dof_indices)
         
         # Step multiple times for control frequency
         substeps = int(self.cfg.dt / self.cfg.sim_dt)
@@ -558,7 +632,7 @@ class MicroduckEnv:
         import torch
         
         if self.use_torch:
-            self.push_time += self.cfg.dt
+            self.push_time = self.push_time + self.cfg.dt
             push_mask = self.push_time > self.cfg.push_interval
             
             if push_mask.any():
@@ -566,34 +640,42 @@ class MicroduckEnv:
                 n = len(push_ids)
                 
                 # Random push force
-                force_mag = torch.empty(n, device=self.device).uniform_(
+                force_mag = torch.empty(n, device=self.device, dtype=torch.float32).uniform_(
                     self.cfg.push_force_range[0], self.cfg.push_force_range[1]
                 )
-                angle = torch.empty(n, device=self.device).uniform_(0, 2 * np.pi)
+                angle = torch.empty(n, device=self.device, dtype=torch.float32).uniform_(0, 2 * np.pi)
                 
-                # Apply horizontal push
-                forces = torch.zeros((n, 6), device=self.device)
-                forces[:, 0] = force_mag * torch.cos(angle)
-                forces[:, 1] = force_mag * torch.sin(angle)
+                # Apply horizontal push by modifying velocity
+                current_vel = self.robot.get_vel()
+                push_vel = torch.zeros((n, 3), device=self.device, dtype=torch.float32)
+                push_vel[:, 0] = force_mag * torch.cos(angle) * 0.1  # Scale force to velocity impulse
+                push_vel[:, 1] = force_mag * torch.sin(angle) * 0.1
                 
-                # Apply impulse (simplified - actual implementation depends on Genesis API)
-                # self.robot.apply_external_force(forces, envs_idx=push_ids)
+                new_vel = current_vel.clone()
+                new_vel[push_ids] = current_vel[push_ids] + push_vel
+                self.robot.set_vel(new_vel)
                 
-                self.push_time[push_ids] = 0
+                self.push_time[push_ids] = 0.0
     
     def _compute_observations(self):
         """Compute observation vector"""
         import torch
         
         if self.backend == "genesis":
-            # Get robot state from Genesis
-            joint_pos = self.robot.get_dofs_position()  # (num_envs, num_joints)
-            joint_vel = self.robot.get_dofs_velocity()
+            # Get robot state from Genesis - use leg DOF indices
+            if self.leg_dof_indices:
+                dof_indices = torch.tensor(self.leg_dof_indices, device=self.device, dtype=torch.long)
+                joint_pos = self.robot.get_dofs_position(dofs_idx_local=dof_indices)
+                joint_vel = self.robot.get_dofs_velocity(dofs_idx_local=dof_indices)
+            else:
+                joint_pos = self.robot.get_dofs_position()[:, :self.NUM_JOINTS]
+                joint_vel = self.robot.get_dofs_velocity()[:, :self.NUM_JOINTS]
+            
             base_quat = self.robot.get_quat()  # (num_envs, 4) - wxyz
             base_ang_vel = self.robot.get_ang()  # Angular velocity
             
             # Gravity vector in body frame
-            gravity_world = torch.tensor([0, 0, -1], device=self.device, dtype=torch.float32)
+            gravity_world = torch.tensor([0.0, 0.0, -1.0], device=self.device, dtype=torch.float32)
             gravity_body = self._quat_rotate_inverse(base_quat, gravity_world.unsqueeze(0).expand(self.num_envs, -1))
             
             # Phase encoding (sin/cos for gait timing)
@@ -655,31 +737,39 @@ class MicroduckEnv:
             base_quat = self.robot.get_quat()
             base_lin_vel = self.robot.get_vel()
             base_ang_vel = self.robot.get_ang()
-            joint_vel = self.robot.get_dofs_velocity()
+            
+            if self.leg_dof_indices:
+                dof_indices = torch.tensor(self.leg_dof_indices, device=self.device, dtype=torch.long)
+                joint_vel = self.robot.get_dofs_velocity(dofs_idx_local=dof_indices)
+            else:
+                joint_vel = self.robot.get_dofs_velocity()[:, :self.NUM_JOINTS]
             
             # Alive reward - encourage survival
-            r_alive = scales["alive"] * torch.ones(self.num_envs, device=self.device)
+            r_alive = scales["alive"] * torch.ones(self.num_envs, device=self.device, dtype=torch.float32)
             
             # Upright reward - penalize tilting
+            # gravity_body[:, 2] is -1 when upright, closer to 0 or positive when tilted
             gravity_body = self._quat_rotate_inverse(
                 base_quat, 
-                torch.tensor([0, 0, -1], device=self.device).unsqueeze(0).expand(self.num_envs, -1)
+                torch.tensor([0.0, 0.0, -1.0], device=self.device, dtype=torch.float32).unsqueeze(0).expand(self.num_envs, -1)
             )
-            r_upright = scales["upright"] * (gravity_body[:, 2] + 1) / 2  # 0 to 1
+            # FIX: When upright, gravity_body[:,2] = -1, so we want reward = 1
+            # Formula: (-gravity_body[:, 2] + 1) / 2 gives 1 when upright, 0 when tilted 90°
+            r_upright = scales["upright"] * (-gravity_body[:, 2] + 1.0) / 2.0
             
             # Height reward - maintain target height
-            target_height = 0.22
+            target_height = self.cfg.target_height
             height_error = torch.abs(base_pos[:, 2] - target_height)
-            r_height = scales["height"] * torch.exp(-10 * height_error)
+            r_height = scales["height"] * torch.exp(-10.0 * height_error)
             
             # Velocity tracking reward
             vel_error_x = torch.square(base_lin_vel[:, 0] - self.commands[:, 0])
             vel_error_y = torch.square(base_lin_vel[:, 1] - self.commands[:, 1])
-            r_vel = scales["velocity_tracking"] * torch.exp(-5 * (vel_error_x + vel_error_y))
+            r_vel = scales["velocity_tracking"] * torch.exp(-5.0 * (vel_error_x + vel_error_y))
             
             # Angular velocity tracking
             yaw_rate_error = torch.square(base_ang_vel[:, 2] - self.commands[:, 2])
-            r_ang_vel = scales["angular_velocity_tracking"] * torch.exp(-5 * yaw_rate_error)
+            r_ang_vel = scales["angular_velocity_tracking"] * torch.exp(-5.0 * yaw_rate_error)
             
             # Action rate penalty - smooth actions
             action_diff = self.actions - self.last_actions
@@ -705,12 +795,12 @@ class MicroduckEnv:
                 # Alive
                 r_alive = scales["alive"]
                 
-                # Upright
+                # Upright - FIX: same as Genesis
                 gravity_body = self._quat_rotate_inverse_np(base_quat, np.array([0, 0, -1]))
-                r_upright = scales["upright"] * (gravity_body[2] + 1) / 2
+                r_upright = scales["upright"] * (-gravity_body[2] + 1.0) / 2.0
                 
                 # Height
-                height_error = abs(base_pos[2] - 0.22)
+                height_error = abs(base_pos[2] - self.cfg.target_height)
                 r_height = scales["height"] * np.exp(-10 * height_error)
                 
                 # Velocity tracking
@@ -738,18 +828,26 @@ class MicroduckEnv:
             base_pos = self.robot.get_pos()
             base_quat = self.robot.get_quat()
             
-            # Height check
+            # Height check - terminate if too low
             height_terminate = base_pos[:, 2] < self.cfg.min_height
             
-            # Orientation check (roll/pitch)
+            # Orientation check using projected gravity
+            # When upright: gravity_body = [0, 0, -1]
+            # We compute tilt from how far gravity_body deviates from [0, 0, -1]
             gravity_body = self._quat_rotate_inverse(
                 base_quat,
-                torch.tensor([0, 0, -1], device=self.device).unsqueeze(0).expand(self.num_envs, -1)
+                torch.tensor([0.0, 0.0, -1.0], device=self.device, dtype=torch.float32).unsqueeze(0).expand(self.num_envs, -1)
             )
-            roll = torch.atan2(gravity_body[:, 1], gravity_body[:, 2])
-            pitch = torch.atan2(gravity_body[:, 0], gravity_body[:, 2])
             
-            orientation_terminate = (torch.abs(roll) > self.cfg.max_roll) | (torch.abs(pitch) > self.cfg.max_pitch)
+            # Compute roll and pitch from gravity projection
+            # roll: rotation around X axis - measured by Y component of gravity
+            # pitch: rotation around Y axis - measured by X component of gravity
+            # When upright: gravity_body ≈ [0, 0, -1]
+            # sin(roll) ≈ gravity_body[:, 1], sin(pitch) ≈ gravity_body[:, 0]
+            roll_angle = torch.asin(torch.clamp(gravity_body[:, 1], -1.0, 1.0))
+            pitch_angle = torch.asin(torch.clamp(gravity_body[:, 0], -1.0, 1.0))
+            
+            orientation_terminate = (torch.abs(roll_angle) > self.cfg.max_roll) | (torch.abs(pitch_angle) > self.cfg.max_pitch)
             
             self.dones = height_terminate | orientation_terminate
         
@@ -767,10 +865,10 @@ class MicroduckEnv:
                 
                 # Orientation
                 gravity_body = self._quat_rotate_inverse_np(base_quat, np.array([0, 0, -1]))
-                roll = np.arctan2(gravity_body[1], gravity_body[2])
-                pitch = np.arctan2(gravity_body[0], gravity_body[2])
+                roll_angle = np.arcsin(np.clip(gravity_body[1], -1.0, 1.0))
+                pitch_angle = np.arcsin(np.clip(gravity_body[0], -1.0, 1.0))
                 
-                if abs(roll) > self.cfg.max_roll or abs(pitch) > self.cfg.max_pitch:
+                if abs(roll_angle) > self.cfg.max_roll or abs(pitch_angle) > self.cfg.max_pitch:
                     self.dones[i] = True
                 else:
                     self.dones[i] = False
