@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Microduck PPO Training Script
 
@@ -322,8 +322,11 @@ class PPOTrainer:
         
         episode_rewards = []
         episode_lengths = []
-        current_rewards = torch.zeros(self.env.num_envs, device=self.device, dtype=torch.float32)
-        current_lengths = torch.zeros(self.env.num_envs, device=self.device, dtype=torch.float32)
+        if not hasattr(self, '_cur_rew'):
+            self._cur_rew = torch.zeros(self.env.num_envs, device=self.device, dtype=torch.float32)
+            self._cur_len = torch.zeros(self.env.num_envs, device=self.device, dtype=torch.float32)
+        current_rewards = self._cur_rew
+        current_lengths = self._cur_len
         
         for step in range(self.cfg.num_steps):
             with torch.no_grad():
@@ -355,6 +358,7 @@ class PPOTrainer:
                 episode_lengths.append(ep_length)
                 current_rewards[idx] = 0.0
                 current_lengths[idx] = 0.0
+            self._cur_rew, self._cur_len = current_rewards, current_lengths
             
             obs = next_obs
             
@@ -541,7 +545,7 @@ def main():
         grid = args.viewer_grid.split('x')
         viewer_envs = int(grid[0]) * int(grid[1])
         print(f"Viewer mode: using {viewer_envs} environments in {args.viewer_grid} grid")
-        args.num_envs = viewer_envs
+        # keep --num-envs for training; viewer only renders the grid's envs
     
     # VRAM management: For 8GB GPU, recommend max ~2048 envs
     if args.device == "cuda" and args.num_envs > 2048:

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Microduck Bipedal Robot Environment
 
 A Gymnasium-style vectorized environment for training the Pollen Robotics Microduck robot.
@@ -241,9 +241,11 @@ class MicroduckEnv:
         if self.render_enabled and not self.headless:
             viewer_opts = gs.options.ViewerOptions(
                 refresh_rate=60,
-                camera_pos=(0.5, 0.0, 0.3),
-                camera_lookat=(0.0, 0.0, 0.1),
+                camera_pos=(-1.2, -1.2, 1.0),
+                camera_lookat=(0.0, 0.0, 0.05),
             )
+            _side = int(np.ceil(np.sqrt(self.num_envs)))
+            vis_opts = gs.options.VisOptions(rendered_envs_idx=[r * _side + c for r in range(3) for c in range(3)])
             show_viewer = True
         else:
             vis_opts = gs.options.VisOptions(
@@ -270,11 +272,12 @@ class MicroduckEnv:
             robot_path = self.cfg.robot_xml
         
         self.robot = self.scene.add_entity(
-            gs.morphs.MJCF(file=robot_path),
+            # Genesis treats the base as fixed when loading scene.xml (via <include>); load the robot file directly
+            gs.morphs.MJCF(file=robot_path.replace('scene.xml', 'microduck.xml')),
         )
         
         # Build scene with parallel environments
-        self.scene.build(n_envs=self.num_envs)
+        self.scene.build(n_envs=self.num_envs, env_spacing=(0.4, 0.4) if self.render_enabled else (0.0, 0.0))
         
         # Get joint DOF indices
         self.leg_dof_indices = []
@@ -395,8 +398,8 @@ class MicroduckEnv:
             init_quat = init_quat.expand(n, -1)
             self.robot.set_pos(init_pos)
             self.robot.set_quat(init_quat)
-            self.robot.set_vel(torch.zeros((n, 3), device=self.device, dtype=torch.float32))
-            self.robot.set_ang(torch.zeros((n, 3), device=self.device, dtype=torch.float32))
+            self.robot.set_dofs_velocity(torch.zeros((n, 3), device=self.device, dtype=torch.float32), dofs_idx_local=[0, 1, 2])
+            self.robot.set_dofs_velocity(torch.zeros((n, 3), device=self.device, dtype=torch.float32), dofs_idx_local=[3, 4, 5])
             
             self.episode_length.zero_()
             self.last_actions.zero_()
@@ -424,8 +427,8 @@ class MicroduckEnv:
             
             self.robot.set_pos(init_pos, envs_idx=env_ids_tensor)
             self.robot.set_quat(init_quat, envs_idx=env_ids_tensor)
-            self.robot.set_vel(torch.zeros((n, 3), device=self.device, dtype=torch.float32), envs_idx=env_ids_tensor)
-            self.robot.set_ang(torch.zeros((n, 3), device=self.device, dtype=torch.float32), envs_idx=env_ids_tensor)
+            self.robot.set_dofs_velocity(torch.zeros((n, 3), device=self.device, dtype=torch.float32), dofs_idx_local=[0, 1, 2], envs_idx=env_ids_tensor)
+            self.robot.set_dofs_velocity(torch.zeros((n, 3), device=self.device, dtype=torch.float32), dofs_idx_local=[3, 4, 5], envs_idx=env_ids_tensor)
             
             self.episode_length[env_ids_tensor] = 0.0
             self.last_actions[env_ids_tensor] = 0.0
@@ -603,7 +606,7 @@ class MicroduckEnv:
                 
                 new_vel = current_vel.clone()
                 new_vel[push_ids] = current_vel[push_ids] + push_vel
-                self.robot.set_vel(new_vel)
+                self.robot.set_dofs_velocity(new_vel[push_ids], dofs_idx_local=[0, 1, 2], envs_idx=push_ids)
                 
                 self.push_time[push_ids] = 0.0
     
