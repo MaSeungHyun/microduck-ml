@@ -1,0 +1,34 @@
+<!--
+  CartPole 장면.
+
+  Gymnasium CartPole-v1과 숫자를 맞춘 부분:
+  - 카트 질량 1kg, 막대 질량 0.1kg, 막대 길이 1m (질량 중심은 힌지에서 0.5m)
+  - 중력은 환경이 씬을 만들 때 (0, 0, -9.8)로 다시 지정한다.
+
+  다른 점:
+  - 막대는 균일 막대 공식이 아니라 반지름 2cm 캡슐이다. 관성은 형상에서 계산된다.
+  - 슬라이드 조인트에는 범위 제한이 없다. ±2.4m에서 멈추는 일은 환경 코드가 한다.
+  - 레일 지옴은 보이기만 하고 충돌하지 않는다 (contype=0).
+-->
+<mujoco model="cartpole">
+  <compiler angle="radian" inertiafromgeom="true"/>
+  <option gravity="0 0 -9.8" timestep="0.02"/>
+  <default>
+    <joint damping="0" armature="0" frictionloss="0"/>
+    <geom contype="0" conaffinity="0"/>
+  </default>
+  <worldbody>
+    <geom name="rail" type="capsule" fromto="-2.4 0 0 2.4 0 0" size="0.012" rgba="0.35 0.35 0.38 1"/>
+    <body name="cart" pos="0 0 0">
+      <joint name="slider" type="slide" axis="1 0 0"/>
+      <geom name="cart" type="box" size="0.16 0.10 0.06" mass="1.0" rgba="0.20 0.45 0.85 1"/>
+      <body name="pole" pos="0 0 0">
+        <joint name="hinge" type="hinge" axis="0 1 0"/>
+        <geom name="pole" type="capsule" fromto="0 0 0 0 0 1.0" size="0.02" mass="0.1" rgba="0.86 0.32 0.22 1"/>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="slide" joint="slider" gear="1" ctrllimited="true" ctrlrange="-20 20"/>
+  </actuator>
+</mujoco>

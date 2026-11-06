@@ -168,6 +168,32 @@ microduck-rl/
 - 기저부 높이가 5cm 미만
 - 롤/피치 각도가 1.2 rad (~70°) 초과
 
+## 입문 예제: Genesis CartPole
+
+Microduck 보행 학습과 별개로, `genesis_cartpole/`에 CartPole 환경을 직접 작성해 두었습니다. Gymnasium의 `CartPole-v1`을 불러오지 않습니다. Genesis가 레일 위 카트와 힌지 막대를 적분하고, 관측·보상·종료는 `genesis_cartpole/env.py`가 정합니다.
+
+장면은 카트(1kg)와 길이 1m 막대(0.1kg), 중력 9.8입니다. 행동 `0`은 왼쪽 10N, `1`은 오른쪽 10N입니다. 관측은 카트 위치, 카트 속도, 막대 각도, 막대 각속도입니다. 막대가 약 12도를 넘거나 카트가 ±2.4m를 벗어나면 `terminated`, 500스텝에 도달하면 `truncated`입니다. 보상은 매 스텝 +1이고, 실패한 스텝도 +1입니다.
+
+Gymnasium `CartPole-v1`과 종료 규칙과 물리 파라미터(질량, 힘, 중력, 0.02초)는 맞췄습니다. 다른 점은 동역학이 해석식 오일러가 아니라 Genesis 강체 솔버라는 것, 막대가 균일 막대 공식이 아니라 캡슐이라는 것, `reset()`이 관측만 반환한다는 것, 환경이 하나뿐이라는 것입니다. 자세한 비교와 설치 한계는 `genesis_cartpole/README.md`에 있습니다.
+
+CPU에서 확인한 설치:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install "genesis-world==1.4.5"
+# 뷰어를 꺼도 scene.build()에 EGL이 필요합니다.
+sudo apt-get install -y libegl1 libgl1-mesa-dri
+```
+
+저장소 루트에서:
+
+```bash
+python -m genesis_cartpole.rollout --episodes 3
+python -m genesis_cartpole.train_reinforce --episodes 200
+python -m genesis_cartpole.train_reinforce --episodes 200 --render --speed 2 --play
+python -m genesis_cartpole.test_cartpole
+```
+
 ## 문제 해결
 
 ### Genesis 설치 오류
