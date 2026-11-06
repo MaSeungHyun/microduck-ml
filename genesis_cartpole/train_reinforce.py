@@ -54,9 +54,29 @@ def _discounted_returns(rewards: List[float], gamma: float) -> torch.Tensor:
     return tensor
 
 
-def train(episodes: int, seed: int, learning_rate: float, gamma: float, hidden_size: int, log_every: int) -> None:
+def _act(policy: Policy, obs: np.ndarray, greedy: bool) -> tuple[int, torch.Tensor | None]:
+    obs_tensor = torch.tensor(obs / OBS_SCALE, dtype=torch.float32)
+    distribution = policy(obs_tensor)
+    if greedy:
+        return int(torch.argmax(distribution.logits).item()), None
+    action = distribution.sample()
+    return int(action.item()), distribution.log_prob(action)
+
+
+def train(
+    episodes: int,
+    seed: int,
+    learning_rate: float,
+    gamma: float,
+    hidden_size: int,
+    log_every: int,
+    render: bool,
+    speed: float,
+) -> Policy:
     torch.manual_seed(seed)
-    env = CartPoleEnv(seed=seed, backend="cpu")
+    if render:
+        print(f"뷰어를 엽니다. 재생 배속은 {speed:g}배입니다.", flush=True)
+    env = CartPoleEnv(seed=seed, backend="cpu", render=render, realtime_factor=speed)
     policy = Policy(hidden_size)
     optimizer = torch.optim.Adam(policy.parameters(), lr=learning_rate)
     recent: List[float] = []
@@ -69,11 +89,9 @@ def train(episodes: int, seed: int, learning_rate: float, gamma: float, hidden_s
             terminated = False
             truncated = False
             while not (terminated or truncated):
-                obs_tensor = torch.tensor(obs / OBS_SCALE, dtype=torch.float32)
-                distribution = policy(obs_tensor)
-                action = distribution.sample()
-                log_probs.append(distribution.log_prob(action))
-                obs, reward, terminated, truncated, info = env.step(int(action.item()))
+                action, log_prob = _act(policy, obs, greedy=False)
+                log_probs.append(log_prob)
+                obs, reward, terminated, truncated, info = env.step(action)
                 rewards.append(reward)
 
             returns = _discounted_returns(rewards, gamma)
@@ -96,6 +114,29 @@ def train(episodes: int, seed: int, learning_rate: float, gamma: float, hidden_s
                 )
     finally:
         env.close()
+    return policy
+
+
+def play(policy: Policy, seed: int, speed: float) -> None:
+    """학습이 끝난 정책을 화면에서 반복 재생한다. Ctrl+C로 닫는다."""
+    env = CartPoleEnv(seed=seed, backend="cpu", render=True, realtime_factor=speed)
+    print("학습된 정책을 화면에 반복 재생합니다. 끝내려면 Ctrl+C.", flush=True)
+    try:
+        while True:
+            obs = env.reset()
+            terminated = False
+            truncated = False
+            while not (terminated or truncated):
+                action, _ = _act(policy, obs, greedy=True)
+                obs, _, terminated, truncated, info = env.step(action)
+            print(
+                f"playback: steps={info['steps']} failure={info['failure']} truncated={truncated}",
+                flush=True,
+            )
+    except KeyboardInterrupt:
+        print("재생을 멈춥니다.")
+    finally:
+        env.close()
 
 
 def main() -> None:
@@ -106,10 +147,26 @@ def main() -> None:
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--hidden", type=int, default=128)
     parser.add_argument("--log-every", type=int, default=20)
+    parser.add_argument("--render", action="store_true", help="학습하는 동안 뷰어 창을 연다")
+    parser.add_argument("--speed", type=float, default=1.0, help="뷰어 재생 배속. 1이면 실시간과 같다")
+    parser.add_argument("--play", action="store_true", help="학습 뒤 그 정책을 창에서 반복 재생한다")
     args = parser.parse_args()
     if args.episodes < 1:
         raise SystemExit("--episodes는 1 이상이어야 합니다.")
-    train(args.episodes, args.seed, args.lr, args.gamma, args.hidden, args.log_every)
+    if args.speed <= 0:
+        raise SystemExit("--speed는 0보다 커야 합니다.")
+    policy = train(
+        args.episodes,
+        args.seed,
+        args.lr,
+        args.gamma,
+        args.hidden,
+        args.log_every,
+        args.render,
+        args.speed,
+    )
+    if args.play:
+        play(policy, args.seed, args.speed)
 
 
 if __name__ == "__main__":

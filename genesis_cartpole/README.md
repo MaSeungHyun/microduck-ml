@@ -73,8 +73,12 @@ python -m genesis_cartpole.rollout --episodes 3
 # 화면이 있을 때 뷰어
 python -m genesis_cartpole.rollout --episodes 1 --render
 
-# REINFORCE 200에피소드 (CPU)
+# REINFORCE 200에피소드 (CPU, 창 없음)
 python -m genesis_cartpole.train_reinforce --episodes 200
+
+# 학습하는 모습을 창으로 보기. --speed 2는 실시간의 두 배.
+# --play는 학습이 끝난 정책을 그 창에서 반복 재생한다.
+python -m genesis_cartpole.train_reinforce --episodes 200 --render --speed 2 --play
 
 # 보상과 종료 검사. 창을 열지 않는다.
 python -m genesis_cartpole.test_cartpole

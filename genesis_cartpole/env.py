@@ -63,6 +63,7 @@ class CartPoleEnv:
         dt: float = 0.02,
         gravity: float = 9.8,
         backend: str = "cpu",
+        realtime_factor: float = 1.0,
     ):
         if max_episode_steps < 1:
             raise ValueError("max_episode_steps는 1 이상이어야 합니다.")
@@ -77,6 +78,7 @@ class CartPoleEnv:
         self.dt = float(dt)
         self.gravity = float(gravity)
         self.render_enabled = bool(render)
+        self.realtime_factor = float(realtime_factor)
         self.backend = backend
         self.rng = np.random.default_rng(seed)
         self.steps = 0
@@ -95,10 +97,12 @@ class CartPoleEnv:
         viewer_options = None
         if self.render_enabled:
             viewer_options = gs.options.ViewerOptions(
-                camera_pos=(0.0, -3.2, 1.3),
-                camera_lookat=(0.0, 0.0, 0.4),
-                camera_fov=40,
-                max_FPS=60,
+                res=(1280, 800),
+                camera_pos=(0.0, -2.4, 1.05),
+                camera_lookat=(0.0, 0.0, 0.45),
+                camera_fov=45,
+                refresh_rate=60,
+                realtime_factor=self.realtime_factor,
             )
 
         # 뷰어를 꺼도 Genesis는 오프스크린 OpenGL(EGL)로 씬을 만든다.
@@ -165,6 +169,7 @@ class CartPoleEnv:
         self.steps += 1
 
         obs = self._observe()
+        self._follow_cart(float(obs[0]))
         x = float(obs[0])
         theta = float(obs[2])
         # 물리 엔진은 이 한계를 모른다. 끝났는지는 여기서 정한다.
@@ -192,6 +197,15 @@ class CartPoleEnv:
         if scene is not None:
             scene.destroy()
             self.scene = None
+
+    def _follow_cart(self, x: float) -> None:
+        """카트가 레일을 따라 움직여도 화면 가운데에 남게 카메라를 옮긴다."""
+        if not self.render_enabled:
+            return
+        viewer = getattr(self.scene, "viewer", None)
+        if viewer is None:
+            return
+        viewer.set_camera_pose(pos=(x, -2.4, 1.05), lookat=(x, 0.0, 0.45))
 
     def _observe(self) -> np.ndarray:
         qpos = _as_numpy(self.robot.get_qpos())

@@ -190,6 +190,7 @@ sudo apt-get install -y libegl1 libgl1-mesa-dri
 ```bash
 python -m genesis_cartpole.rollout --episodes 3
 python -m genesis_cartpole.train_reinforce --episodes 200
+python -m genesis_cartpole.train_reinforce --episodes 200 --render --speed 2 --play
 python -m genesis_cartpole.test_cartpole
 ```
 
